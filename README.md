@@ -43,11 +43,12 @@ Vercelはサーバーレス（実行ごとにファイルが消える）ため�
 3. **Vercelの環境変数を設定**（Project → Settings → Environment Variables）
    - `TURSO_DATABASE_URL`
    - `TURSO_AUTH_TOKEN`
-   - `APP_BASE_URL`（デプロイ後の本番URL。例 `https://mailwise.example.vercel.app`）
+   - `APP_BASE_URL`（**任意**。未設定でもVercel本番ドメインを自動使用します。独自ドメインを使う場合のみ設定）
 4. **Deploy**。発行された `https://～.vercel.app` が、このWebアプリのURLです。
    - 配信停止URLは `https://～.vercel.app/unsubscribe?id=配信停止ID` の形で出力CSVに入ります。
 
-> 補足: `APP_BASE_URL` は配信停止URLの生成にのみ使われます。独自ドメインをVercelに割り当てた場合は、その独自ドメインを `APP_BASE_URL` に設定してください。
+> 補足: 配信停止URLのドメインは `APP_BASE_URL` → Vercel本番ドメイン（自動）→ localhost の順で決まります。
+> 独自ドメインをVercelに割り当てた場合は、その独自ドメインを `APP_BASE_URL` に設定してください。
 
 ## 画面
 
