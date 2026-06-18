@@ -107,7 +107,19 @@ function toJp(iso: string): string {
 }
 
 async function main() {
-  // Reset.
+  // Idempotent: skip if the database already has data (safe to run on every deploy).
+  const [wCount, tplCount] = await Promise.all([
+    prisma.webinar.count(),
+    prisma.taskTemplate.count(),
+  ]);
+  if (wCount > 0 || tplCount > 0) {
+    console.log(
+      `既存データを検出（ウェビナー ${wCount} 件 / テンプレ ${tplCount} 件）。シードをスキップします。`
+    );
+    return;
+  }
+
+  // Reset (no-op on a fresh database).
   await prisma.task.deleteMany();
   await prisma.webinar.deleteMany();
   await prisma.taskTemplate.deleteMany();
@@ -179,12 +191,17 @@ async function main() {
     const [large, middle, small, company, assignee, status, effort, start, due, note] = r;
     grid.push(["", large, middle, small, company, assignee, status, effort == null ? "" : String(effort), toJp(start), toJp(due), note]);
   }
-  const csv = Papa.unparse(grid);
-  const outDir = join(process.cwd(), "sample-data");
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, "webinar-2026-07-29.csv"), csv, "utf8");
+  // Best-effort: write a re-importable sample CSV (skipped if FS is read-only).
+  try {
+    const csv = Papa.unparse(grid);
+    const outDir = join(process.cwd(), "sample-data");
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(join(outDir, "webinar-2026-07-29.csv"), csv, "utf8");
+  } catch {
+    /* ignore in build/serverless environments */
+  }
 
-  console.log(`Seeded: ${DATA.length} template tasks, 1 demo webinar, sample CSV written.`);
+  console.log(`Seeded: ${DATA.length} template tasks, 1 demo webinar.`);
 }
 
 main()
