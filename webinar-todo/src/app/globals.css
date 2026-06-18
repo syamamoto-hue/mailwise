@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-800;
+  font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+    sans-serif;
+}
+
+/* Spreadsheet-like compact inputs inside the task grid. */
+.cell-input {
+  @apply w-full bg-transparent px-1.5 py-1 text-[13px] outline-none focus:bg-white focus:ring-1 focus:ring-brand rounded;
+}
+
+.btn {
+  @apply inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50;
+}
+.btn-primary {
+  @apply inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50 border border-transparent;
+}
+.btn-ghost {
+  @apply inline-flex items-center gap-1 rounded px-2 py-1 text-[12px] text-slate-500 hover:bg-slate-100 hover:text-slate-700;
+}
+.card {
+  @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+}
+.label {
+  @apply block text-[12px] font-medium text-slate-500 mb-1;
+}
+.field {
+  @apply w-full rounded-md border border-slate-300 px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-brand/40 focus:border-brand;
+}

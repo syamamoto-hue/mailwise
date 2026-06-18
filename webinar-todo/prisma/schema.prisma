@@ -1,0 +1,85 @@
+// Prisma schema for the Webinar ToDo management app.
+// Dates are stored as ISO date strings (yyyy-MM-dd) to keep date-only semantics simple.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Webinar {
+  id                     String   @id @default(cuid())
+  title                  String
+  webinarDate            String // yyyy-MM-dd
+  leadStartDate          String? // 集客開始日
+  firstMaterialShareDate String? // 一次資料共有日
+  slideFixDate           String? // ご講演資料FIX日
+  status                 String   @default("準備中") // 準備中 | 開催済み | 中止 | アーカイブ
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  tasks Task[]
+}
+
+model Task {
+  id                   String  @id @default(cuid())
+  webinarId            String
+  parentTemplateTaskId String?
+
+  largeCategory  String @default("")
+  middleCategory String @default("")
+  smallCategory  String @default("")
+
+  company  String?
+  assignee String?
+
+  status String @default("未着手") // 未着手 | 着手中 | 完了 | 保留 | 不要
+
+  effortDays Float?
+
+  startOffsetDays Int? // 開催日の何日前に着手するか
+  dueOffsetDays   Int? // 開催日の何日前を期日にするか
+
+  startDate     String? // yyyy-MM-dd
+  dueDate       String? // yyyy-MM-dd
+  completedDate String? // yyyy-MM-dd
+
+  note      String?
+  sortOrder Int     @default(0)
+
+  isManuallyOverridden Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId])
+}
+
+model TaskTemplate {
+  id String @id @default(cuid())
+
+  largeCategory  String @default("")
+  middleCategory String @default("")
+  smallCategory  String @default("")
+
+  company  String?
+  assignee String?
+
+  defaultStatus String @default("未着手")
+
+  effortDays Float?
+
+  startOffsetDays Int?
+  dueOffsetDays   Int?
+
+  note      String?
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
