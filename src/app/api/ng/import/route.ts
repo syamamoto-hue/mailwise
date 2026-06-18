@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     let added = 0;
     let skipped = 0;
     for (const r of records) {
-      const ok = addNg({
+      const ok = await addNg({
         email: r.email,
         addressName: r.addressName,
         unsubscribeId: r.unsubscribeId,

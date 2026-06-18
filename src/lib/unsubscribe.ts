@@ -3,16 +3,16 @@ import { findByUnsubscribeId, isEmailInNg, addNg } from "./db";
 
 export type UnsubscribeStatus = "accepted" | "already" | "invalid";
 
-export function processUnsubscribe(id: string): UnsubscribeStatus {
+export async function processUnsubscribe(id: string): Promise<UnsubscribeStatus> {
   const cleanedId = String(id ?? "").trim();
   if (!cleanedId) return "invalid";
 
-  const info = findByUnsubscribeId(cleanedId);
+  const info = await findByUnsubscribeId(cleanedId);
   if (!info || !info.email) return "invalid";
 
-  if (isEmailInNg(info.email)) return "already";
+  if (await isEmailInNg(info.email)) return "already";
 
-  addNg({
+  await addNg({
     email: info.email,
     addressName: info.address_name,
     unsubscribeId: info.unsubscribe_id,

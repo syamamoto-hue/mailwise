@@ -6,5 +6,5 @@ export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id") ?? "";
-  return NextResponse.json({ status: processUnsubscribe(id) });
+  return NextResponse.json({ status: await processUnsubscribe(id) });
 }

@@ -24,34 +24,45 @@ after(() => {
   }
 });
 
-test("配信停止ID：同一メールには同じIDを再利用", () => {
+test("配信停止ID：同一メールには同じIDを再利用", async () => {
   const c = { source: "WeSmile", email: "reuse@example.com", name: "再利用", addressName: "再利用先生", clinic: "" };
-  const first = db.getOrIssueUnsubscribeId(c);
-  const second = db.getOrIssueUnsubscribeId(c);
+  const first = await db.getOrIssueUnsubscribeId(c);
+  const second = await db.getOrIssueUnsubscribeId(c);
   assert.equal(first.unsubscribe_id, second.unsubscribe_id);
   assert.match(first.unsubscribe_id, /^[A-Za-z0-9]{12}$/);
 });
 
-test("5. 配信停止リンクを2回押しても二重登録されない", () => {
-  const c = { source: "1D", email: "twice@example.com", name: "二回", addressName: "二回先生", clinic: "Cクリニック" };
-  const info = db.getOrIssueUnsubscribeId(c);
+test("配信停止ID：バッチ発行でも既存IDを再利用", async () => {
+  const c = { source: "WeSmile", email: "reuse@example.com", name: "再利用", addressName: "再利用先生", clinic: "" };
+  const existing = await db.getOrIssueUnsubscribeId(c);
+  const map = await db.getOrIssueUnsubscribeIds([
+    c,
+    { source: "1D", email: "batch-new@example.com", name: "新規", addressName: "新規先生", clinic: "" },
+  ]);
+  assert.equal(map.get("reuse@example.com"), existing.unsubscribe_id);
+  assert.match(map.get("batch-new@example.com")!, /^[A-Za-z0-9]{12}$/);
+});
 
-  const r1 = unsub.processUnsubscribe(info.unsubscribe_id);
-  const r2 = unsub.processUnsubscribe(info.unsubscribe_id);
+test("5. 配信停止リンクを2回押しても二重登録されない", async () => {
+  const c = { source: "1D", email: "twice@example.com", name: "二回", addressName: "二回先生", clinic: "Cクリニック" };
+  const info = await db.getOrIssueUnsubscribeId(c);
+
+  const r1 = await unsub.processUnsubscribe(info.unsubscribe_id);
+  const r2 = await unsub.processUnsubscribe(info.unsubscribe_id);
 
   assert.equal(r1, "accepted");
   assert.equal(r2, "already");
 
-  const found = db.listNg("twice@example.com");
+  const found = await db.listNg("twice@example.com");
   assert.equal(found.length, 1);
 });
 
-test("不正なIDでは invalid", () => {
-  assert.equal(unsub.processUnsubscribe("not-exist-id"), "invalid");
-  assert.equal(unsub.processUnsubscribe(""), "invalid");
+test("不正なIDでは invalid", async () => {
+  assert.equal(await unsub.processUnsubscribe("not-exist-id"), "invalid");
+  assert.equal(await unsub.processUnsubscribe(""), "invalid");
 });
 
-test("NGインポート：新形式を取り込み、重複は二重登録しない", () => {
+test("NGインポート：新形式を取り込み、重複は二重登録しない", async () => {
   const matrix = [
     ["メールアドレス", "宛名", "配信停止ID", "停止日時", "停止経路", "元リスト", "所属/医院名"],
     ["new1@example.com", "新規1先生", "ABC123", "2026-01-01", "メールリンク", "WeSmile", "X歯科"],
@@ -60,10 +71,10 @@ test("NGインポート：新形式を取り込み、重複は二重登録しな
   const records = ngImport.parseNgImport(matrix);
   assert.equal(records.length, 1); // インポート側でも重複排除
   let added = 0;
-  for (const r of records) if (db.addNg({ ...r, route: "CSVインポート" })) added++;
+  for (const r of records) if (await db.addNg({ ...r, route: "CSVインポート" })) added++;
   assert.equal(added, 1);
   // 既存なので再度追加しない
-  assert.equal(db.addNg({ email: "new1@example.com", route: "手動登録" }), false);
+  assert.equal(await db.addNg({ email: "new1@example.com", route: "手動登録" }), false);
 });
 
 test("NGインポート：旧形式（除外理由始まり）からメールを抽出", () => {
@@ -77,8 +88,8 @@ test("NGインポート：旧形式（除外理由始まり）からメールを
   assert.equal(records[0].source, "30Under30");
 });
 
-test("固定NGも配信NG集合に含まれる", () => {
-  db.addFixedNg("fixed@example.com");
-  const set = db.getAllNgEmailSet();
+test("固定NGも配信NG集合に含まれる", async () => {
+  await db.addFixedNg("fixed@example.com");
+  const set = await db.getAllNgEmailSet();
   assert.ok(set.has("fixed@example.com"));
 });

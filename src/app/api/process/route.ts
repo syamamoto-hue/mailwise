@@ -1,8 +1,8 @@
 // 統合処理API。FormDataで複数CSVファイルと種別を受け取り、処理結果（JSON）を返す。
 import { NextRequest, NextResponse } from "next/server";
 import { parseCsvToMatrix } from "@/lib/parseCsv";
-import { processLists } from "@/lib/process";
-import { getAllNgEmailSet, getOrIssueUnsubscribeId } from "@/lib/db";
+import { selectRecipients, buildResult } from "@/lib/process";
+import { getAllNgEmailSet, getOrIssueUnsubscribeIds } from "@/lib/db";
 import { buildUnsubscribeUrl } from "@/lib/config";
 import { LIST_TYPES, type ListType, type UploadedList } from "@/lib/types";
 
@@ -29,13 +29,16 @@ export async function POST(req: NextRequest) {
       lists.push({ type, label, rows });
     }
 
-    const ngEmailSet = getAllNgEmailSet();
+    const ngEmailSet = await getAllNgEmailSet();
 
-    const result = processLists(lists, {
-      ngEmailSet,
-      issueUnsubscribeId: (c) => getOrIssueUnsubscribeId(c).unsubscribe_id,
-      buildUnsubscribeUrl,
-    });
+    // 検証・重複除外（同期）→ 配信停止IDをバッチ発行（非同期）→ 出力組み立て
+    const selection = selectRecipients(lists, ngEmailSet);
+    const idMap = await getOrIssueUnsubscribeIds(selection.selected);
+    const result = buildResult(
+      selection,
+      (c) => idMap.get(c.email) ?? "",
+      buildUnsubscribeUrl
+    );
 
     return NextResponse.json(result);
   } catch (err) {

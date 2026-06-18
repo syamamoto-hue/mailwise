@@ -1,26 +1,35 @@
-// SQLite（better-sqlite3）によるローカルDB。
-// 配信NGリスト・固定NGリスト・配信停止ID管理を保持する。
+// libSQL（Turso / ローカルSQLiteファイル）によるDB層。
+// ローカル開発: file:data/mailwise.db、本番(Vercel): TURSO_DATABASE_URL に自動切替。
+// SQLite互換なのでスキーマ・クエリはそのまま。接続はネットワーク経由のため全て非同期。
 
-import Database from "better-sqlite3";
+import { createClient, type Client } from "@libsql/client";
 import fs from "node:fs";
 import path from "node:path";
 import { normalizeEmail, generateUnsubscribeId } from "./normalize";
 import type { Candidate } from "./types";
 
-let _db: Database.Database | null = null;
+let _client: Client | null = null;
+let _schemaReady: Promise<void> | null = null;
 
-export function getDb(): Database.Database {
-  if (_db) return _db;
+function createDbClient(): Client {
+  // 本番: Turso（環境変数）。なければローカルのSQLiteファイル。
+  const tursoUrl = process.env.TURSO_DATABASE_URL;
+  if (tursoUrl) {
+    return createClient({
+      url: tursoUrl,
+      authToken: process.env.TURSO_AUTH_TOKEN,
+    });
+  }
 
-  // テスト等で MAILWISE_DB_PATH を指定可能。未指定なら data/mailwise.db。
+  // ローカル/テスト: file: URL。MAILWISE_DB_PATH で保存先を上書き可能。
   const dbPath = process.env.MAILWISE_DB_PATH || path.join(process.cwd(), "data", "mailwise.db");
   const dataDir = path.dirname(dbPath);
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  return createClient({ url: `file:${dbPath}` });
+}
 
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-
-  db.exec(`
+async function ensureSchema(client: Client): Promise<void> {
+  await client.executeMultiple(`
     CREATE TABLE IF NOT EXISTS ng_list (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL UNIQUE,
@@ -31,13 +40,11 @@ export function getDb(): Database.Database {
       source TEXT DEFAULT '',
       clinic TEXT DEFAULT ''
     );
-
     CREATE TABLE IF NOT EXISTS fixed_ng (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL UNIQUE,
       created_at TEXT DEFAULT ''
     );
-
     CREATE TABLE IF NOT EXISTS unsubscribe_id (
       email TEXT PRIMARY KEY,
       unsubscribe_id TEXT NOT NULL,
@@ -48,9 +55,17 @@ export function getDb(): Database.Database {
       clinic TEXT DEFAULT ''
     );
   `);
+}
 
-  _db = db;
-  return db;
+export async function getDb(): Promise<Client> {
+  if (!_client) {
+    _client = createDbClient();
+  }
+  if (!_schemaReady) {
+    _schemaReady = ensureSchema(_client);
+  }
+  await _schemaReady;
+  return _client;
 }
 
 // ---------- 型 ----------
@@ -83,37 +98,43 @@ export interface UnsubscribeIdRow {
 
 export type StopRoute = "メールリンク" | "手動登録" | "固定NG" | "CSVインポート";
 
+// libSQLの行（Record<string, Value>）を任意の型へ
+function rowsAs<T>(rows: unknown[]): T[] {
+  return rows as unknown as T[];
+}
+
 // ---------- 配信NGリスト ----------
 
 /** 配信NG + 固定NG を合わせた除外用メールアドレス集合 */
-export function getAllNgEmailSet(): Set<string> {
-  const db = getDb();
-  const ng = db.prepare("SELECT email FROM ng_list").all() as { email: string }[];
-  const fixed = db.prepare("SELECT email FROM fixed_ng").all() as { email: string }[];
+export async function getAllNgEmailSet(): Promise<Set<string>> {
+  const db = await getDb();
+  const ng = await db.execute("SELECT email FROM ng_list");
+  const fixed = await db.execute("SELECT email FROM fixed_ng");
   const set = new Set<string>();
-  for (const r of ng) set.add(normalizeEmail(r.email));
-  for (const r of fixed) set.add(normalizeEmail(r.email));
+  for (const r of ng.rows) set.add(normalizeEmail((r as unknown as { email: string }).email));
+  for (const r of fixed.rows) set.add(normalizeEmail((r as unknown as { email: string }).email));
   return set;
 }
 
-export function listNg(search?: string): NgRow[] {
-  const db = getDb();
+export async function listNg(search?: string): Promise<NgRow[]> {
+  const db = await getDb();
   if (search && search.trim()) {
     const like = `%${search.trim()}%`;
-    return db
-      .prepare(
-        "SELECT * FROM ng_list WHERE email LIKE ? OR address_name LIKE ? OR clinic LIKE ? OR source LIKE ? ORDER BY id DESC"
-      )
-      .all(like, like, like, like) as NgRow[];
+    const res = await db.execute({
+      sql: "SELECT * FROM ng_list WHERE email LIKE ? OR address_name LIKE ? OR clinic LIKE ? OR source LIKE ? ORDER BY id DESC",
+      args: [like, like, like, like],
+    });
+    return rowsAs<NgRow>(res.rows);
   }
-  return db.prepare("SELECT * FROM ng_list ORDER BY id DESC").all() as NgRow[];
+  const res = await db.execute("SELECT * FROM ng_list ORDER BY id DESC");
+  return rowsAs<NgRow>(res.rows);
 }
 
 /**
  * 配信NGリストに登録する。既に同じメールがあれば二重登録しない。
  * @returns true=新規登録 / false=既存のためスキップ
  */
-export function addNg(input: {
+export async function addNg(input: {
   email: string;
   addressName?: string;
   unsubscribeId?: string;
@@ -121,61 +142,70 @@ export function addNg(input: {
   source?: string;
   clinic?: string;
   stoppedAt?: string;
-}): boolean {
-  const db = getDb();
+}): Promise<boolean> {
+  const db = await getDb();
   const email = normalizeEmail(input.email);
   if (!email) return false;
 
-  const exists = db.prepare("SELECT 1 FROM ng_list WHERE email = ?").get(email);
-  if (exists) return false;
+  const exists = await db.execute({
+    sql: "SELECT 1 FROM ng_list WHERE email = ?",
+    args: [email],
+  });
+  if (exists.rows.length > 0) return false;
 
-  db.prepare(
-    `INSERT INTO ng_list (email, address_name, unsubscribe_id, stopped_at, route, source, clinic)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    email,
-    input.addressName ?? "",
-    input.unsubscribeId ?? "",
-    input.stoppedAt ?? new Date().toISOString(),
-    input.route,
-    input.source ?? "",
-    input.clinic ?? ""
-  );
+  await db.execute({
+    sql: `INSERT INTO ng_list (email, address_name, unsubscribe_id, stopped_at, route, source, clinic)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      email,
+      input.addressName ?? "",
+      input.unsubscribeId ?? "",
+      input.stoppedAt ?? new Date().toISOString(),
+      input.route,
+      input.source ?? "",
+      input.clinic ?? "",
+    ],
+  });
   return true;
 }
 
-export function isEmailInNg(email: string): boolean {
-  const db = getDb();
+export async function isEmailInNg(email: string): Promise<boolean> {
+  const db = await getDb();
   const e = normalizeEmail(email);
-  return !!db.prepare("SELECT 1 FROM ng_list WHERE email = ?").get(e);
+  const res = await db.execute({ sql: "SELECT 1 FROM ng_list WHERE email = ?", args: [e] });
+  return res.rows.length > 0;
 }
 
-export function deleteNg(id: number): void {
-  getDb().prepare("DELETE FROM ng_list WHERE id = ?").run(id);
+export async function deleteNg(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute({ sql: "DELETE FROM ng_list WHERE id = ?", args: [id] });
 }
 
 // ---------- 固定NGリスト ----------
 
-export function listFixedNg(): FixedNgRow[] {
-  return getDb().prepare("SELECT * FROM fixed_ng ORDER BY id DESC").all() as FixedNgRow[];
+export async function listFixedNg(): Promise<FixedNgRow[]> {
+  const db = await getDb();
+  const res = await db.execute("SELECT * FROM fixed_ng ORDER BY id DESC");
+  return rowsAs<FixedNgRow>(res.rows);
 }
 
 /** 固定NGに追加。既存なら二重登録しない。 */
-export function addFixedNg(email: string): boolean {
-  const db = getDb();
+export async function addFixedNg(email: string): Promise<boolean> {
+  const db = await getDb();
   const e = normalizeEmail(email);
   if (!e) return false;
-  const exists = db.prepare("SELECT 1 FROM fixed_ng WHERE email = ?").get(e);
-  if (exists) return false;
-  db.prepare("INSERT INTO fixed_ng (email, created_at) VALUES (?, ?)").run(
-    e,
-    new Date().toISOString()
-  );
+  const exists = await db.execute({ sql: "SELECT 1 FROM fixed_ng WHERE email = ?", args: [e] });
+  if (exists.rows.length > 0) return false;
+  await db.execute({
+    sql: "INSERT INTO fixed_ng (email, created_at) VALUES (?, ?)",
+    args: [e, new Date().toISOString()],
+  });
   return true;
 }
 
-export function deleteFixedNg(id: number): void {
-  getDb().prepare("DELETE FROM fixed_ng WHERE id = ?").run(id);
+export async function deleteFixedNg(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute({ sql: "DELETE FROM fixed_ng WHERE id = ?", args: [id] });
 }
 
 // ---------- 配信停止ID管理 ----------
@@ -184,34 +214,28 @@ export function deleteFixedNg(id: number): void {
  * メールアドレスごとに配信停止IDを取得（なければ新規発行）。
  * 既存のメールアドレスなら既存IDを再利用する。
  */
-export function getOrIssueUnsubscribeId(item: Candidate): UnsubscribeIdRow {
-  const db = getDb();
+export async function getOrIssueUnsubscribeId(item: Candidate): Promise<UnsubscribeIdRow> {
+  const db = await getDb();
   const email = normalizeEmail(item.email);
   const now = new Date().toISOString();
 
-  const existing = db
-    .prepare("SELECT * FROM unsubscribe_id WHERE email = ?")
-    .get(email) as UnsubscribeIdRow | undefined;
+  const existingRes = await db.execute({
+    sql: "SELECT * FROM unsubscribe_id WHERE email = ?",
+    args: [email],
+  });
+  const existing = existingRes.rows[0] as unknown as UnsubscribeIdRow | undefined;
 
   if (existing) {
-    db.prepare(
-      `UPDATE unsubscribe_id
-       SET updated_at = ?, address_name = ?, source = ?, clinic = ?
-       WHERE email = ?`
-    ).run(
-      now,
-      item.addressName || existing.address_name || "",
-      item.source || existing.source || "",
-      item.clinic || existing.clinic || "",
-      email
-    );
-    return {
-      ...existing,
-      updated_at: now,
+    const merged = {
       address_name: item.addressName || existing.address_name || "",
       source: item.source || existing.source || "",
       clinic: item.clinic || existing.clinic || "",
     };
+    await db.execute({
+      sql: `UPDATE unsubscribe_id SET updated_at = ?, address_name = ?, source = ?, clinic = ? WHERE email = ?`,
+      args: [now, merged.address_name, merged.source, merged.clinic, email],
+    });
+    return { ...existing, updated_at: now, ...merged };
   }
 
   const row: UnsubscribeIdRow = {
@@ -223,24 +247,86 @@ export function getOrIssueUnsubscribeId(item: Candidate): UnsubscribeIdRow {
     source: item.source || "",
     clinic: item.clinic || "",
   };
-  db.prepare(
-    `INSERT INTO unsubscribe_id (email, unsubscribe_id, created_at, updated_at, address_name, source, clinic)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    row.email,
-    row.unsubscribe_id,
-    row.created_at,
-    row.updated_at,
-    row.address_name,
-    row.source,
-    row.clinic
-  );
+  await db.execute({
+    sql: `INSERT INTO unsubscribe_id (email, unsubscribe_id, created_at, updated_at, address_name, source, clinic)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      row.email,
+      row.unsubscribe_id,
+      row.created_at,
+      row.updated_at,
+      row.address_name,
+      row.source,
+      row.clinic,
+    ],
+  });
   return row;
 }
 
+/**
+ * 複数候補の配信停止IDをまとめて取得/発行する（メールごとに既存IDを再利用）。
+ * ネットワークDBのラウンドトリップを抑えるためバッチ処理する。
+ * @returns email -> unsubscribeId のMap
+ */
+export async function getOrIssueUnsubscribeIds(items: Candidate[]): Promise<Map<string, string>> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+
+  // 候補のうち代表メタ情報（最初に現れたもの）を保持
+  const meta = new Map<string, Candidate>();
+  for (const it of items) {
+    const email = normalizeEmail(it.email);
+    if (!email) continue;
+    if (!meta.has(email)) meta.set(email, it);
+  }
+  const emails = Array.from(meta.keys());
+  const idMap = new Map<string, string>();
+  if (emails.length === 0) return idMap;
+
+  // 既存IDを取得（変数上限を考慮してチャンク分割）
+  const CHUNK = 400;
+  for (let i = 0; i < emails.length; i += CHUNK) {
+    const chunk = emails.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const res = await db.execute({
+      sql: `SELECT email, unsubscribe_id FROM unsubscribe_id WHERE email IN (${placeholders})`,
+      args: chunk,
+    });
+    for (const r of res.rows) {
+      const row = r as unknown as { email: string; unsubscribe_id: string };
+      idMap.set(String(row.email), String(row.unsubscribe_id));
+    }
+  }
+
+  // 未発行のメールに新規IDを採番し、バッチINSERT
+  const inserts: { sql: string; args: (string | number)[] }[] = [];
+  for (const email of emails) {
+    if (idMap.has(email)) continue;
+    const it = meta.get(email)!;
+    const newId = generateUnsubscribeId();
+    idMap.set(email, newId);
+    inserts.push({
+      sql: `INSERT INTO unsubscribe_id (email, unsubscribe_id, created_at, updated_at, address_name, source, clinic)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [email, newId, now, now, it.addressName || "", it.source || "", it.clinic || ""],
+    });
+  }
+
+  for (let i = 0; i < inserts.length; i += CHUNK) {
+    await db.batch(inserts.slice(i, i + CHUNK), "write");
+  }
+
+  return idMap;
+}
+
 /** 配信停止IDからレコードを引く */
-export function findByUnsubscribeId(unsubscribeId: string): UnsubscribeIdRow | undefined {
-  return getDb()
-    .prepare("SELECT * FROM unsubscribe_id WHERE unsubscribe_id = ?")
-    .get(unsubscribeId) as UnsubscribeIdRow | undefined;
+export async function findByUnsubscribeId(
+  unsubscribeId: string
+): Promise<UnsubscribeIdRow | undefined> {
+  const db = await getDb();
+  const res = await db.execute({
+    sql: "SELECT * FROM unsubscribe_id WHERE unsubscribe_id = ?",
+    args: [unsubscribeId],
+  });
+  return res.rows[0] as unknown as UnsubscribeIdRow | undefined;
 }

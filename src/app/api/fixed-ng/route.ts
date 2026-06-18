@@ -5,7 +5,7 @@ import { listFixedNg, addFixedNg, deleteFixedNg } from "@/lib/db";
 export const runtime = "nodejs";
 
 export async function GET() {
-  return NextResponse.json({ items: listFixedNg() });
+  return NextResponse.json({ items: await listFixedNg() });
 }
 
 export async function POST(req: NextRequest) {
@@ -14,13 +14,13 @@ export async function POST(req: NextRequest) {
   if (!email) {
     return NextResponse.json({ error: "メールアドレスは必須です" }, { status: 400 });
   }
-  const added = addFixedNg(email);
+  const added = await addFixedNg(email);
   return NextResponse.json({ added });
 }
 
 export async function DELETE(req: NextRequest) {
   const id = Number(req.nextUrl.searchParams.get("id"));
   if (!id) return NextResponse.json({ error: "id が必要です" }, { status: 400 });
-  deleteFixedNg(id);
+  await deleteFixedNg(id);
   return NextResponse.json({ ok: true });
 }

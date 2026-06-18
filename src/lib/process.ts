@@ -43,8 +43,19 @@ export interface ProcessDeps {
   buildUnsubscribeUrl: (unsubscribeId: string) => string;
 }
 
-/** 統合送信用リストを作成する */
-export function processLists(lists: UploadedList[], deps: ProcessDeps): ProcessResult {
+// 検証・重複除外まで終えた選定結果（配信停止ID付与の前段。同期・純粋）
+export interface SelectionResult {
+  selected: PrioritizedCandidate[];
+  logs: ExclusionLog[];
+  duplicateExclusionCount: number;
+  ngExclusionCount: number;
+}
+
+/**
+ * 種別別読み込み → 検証 → 重複除外 までを行う（同期・純粋）。
+ * 配信停止IDの発行（非同期DB）はこの後段で行う。
+ */
+export function selectRecipients(lists: UploadedList[], ngEmailSet: Set<string>): SelectionResult {
   const logs: ExclusionLog[] = [];
 
   // 1) 種別別読み込み
@@ -70,7 +81,7 @@ export function processLists(lists: UploadedList[], deps: ProcessDeps): ProcessR
       logs.push(makeLog("宛名不足のため除外", item));
       continue;
     }
-    if (deps.ngEmailSet.has(item.email)) {
+    if (ngEmailSet.has(item.email)) {
       logs.push(makeLog("配信NGリスト該当のため除外", item));
       ngExclusionCount++;
       continue;
@@ -91,34 +102,47 @@ export function processLists(lists: UploadedList[], deps: ProcessDeps): ProcessR
 
     duplicateExclusionCount++;
     if (item.priority < current.priority) {
-      // 新しい方を残し、今までの方を除外ログへ
       selectedByEmail.set(item.email, item);
       logs.push(makeDuplicateLog(current, item));
     } else {
-      // 既存を残し、新しい方を除外ログへ
       logs.push(makeDuplicateLog(item, current));
     }
   }
 
-  const selected = Array.from(selectedByEmail.values());
+  return {
+    selected: Array.from(selectedByEmail.values()),
+    logs,
+    duplicateExclusionCount,
+    ngExclusionCount,
+  };
+}
 
-  // 4) 配信停止ID/URL付与
+/**
+ * 選定結果に配信停止ID/URLを付与し、出力行とサマリを組み立てる。
+ * getId はメールアドレス→配信停止ID（事前にバッチ発行したMapから引く）。
+ */
+export function buildResult(
+  selection: SelectionResult,
+  getId: (c: PrioritizedCandidate) => string,
+  buildUnsubscribeUrl: (unsubscribeId: string) => string
+): ProcessResult {
+  const { selected, logs, duplicateExclusionCount, ngExclusionCount } = selection;
+
   const rows: OutputRow[] = selected.map((item, i) => {
-    const unsubscribeId = deps.issueUnsubscribeId(item);
+    const unsubscribeId = getId(item);
     const groupNo = Math.floor(i / MAX_ROWS_PER_GROUP) + 1;
     const group = "group_" + String(groupNo).padStart(2, "0");
     return {
       email: item.email,
       addressName: item.addressName,
       unsubscribeId,
-      unsubscribeUrl: deps.buildUnsubscribeUrl(unsubscribeId),
+      unsubscribeUrl: buildUnsubscribeUrl(unsubscribeId),
       source: item.source,
       clinic: item.clinic,
       group,
     };
   });
 
-  // 5) サマリ
   const groupCount = Math.max(1, Math.ceil(rows.length / MAX_ROWS_PER_GROUP));
   const reasonCounts: Record<string, number> = {};
   for (const log of logs) {
@@ -137,6 +161,12 @@ export function processLists(lists: UploadedList[], deps: ProcessDeps): ProcessR
     rows,
     logs,
   };
+}
+
+/** 統合送信用リストを作成する（同期版・テスト/単体利用向け。依存は注入） */
+export function processLists(lists: UploadedList[], deps: ProcessDeps): ProcessResult {
+  const selection = selectRecipients(lists, deps.ngEmailSet);
+  return buildResult(selection, (c) => deps.issueUnsubscribeId(c), deps.buildUnsubscribeUrl);
 }
 
 function makeLog(reason: string, item: Candidate): ExclusionLog {

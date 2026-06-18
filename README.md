@@ -5,24 +5,49 @@
 ## 技術構成
 
 - **Next.js (App Router) + TypeScript + Node.js**
-- **SQLite**（`better-sqlite3`、`data/mailwise.db` に自動生成）
+- **DB: libSQL（SQLite互換）**
+  - ローカル開発: `data/mailwise.db`（SQLiteファイル）を自動生成
+  - 本番(Vercel): **Turso**（環境変数 `TURSO_DATABASE_URL` があれば自動でそちらに接続）
 - CSVパース: `papaparse` / ZIP: `jszip`
 - 業務ロジックは `src/lib/` に純粋関数として集約
 
-## セットアップ
+## セットアップ（ローカル）
 
 ```bash
 npm install
+cp .env.example .env.local   # 必要に応じて編集
 npm run dev      # 開発サーバ（http://localhost:3000）
 npm run build && npm start   # 本番ビルド & 起動
-npm test         # ロジックのテスト（17ケース）
+npm test         # ロジック/DBのテスト
 ```
 
 ### 環境変数
 
-- `APP_BASE_URL` … 配信停止URLのドメイン。例 `https://mail.example.com`。
-  未設定時は `http://localhost:3000`。
-- `MAILWISE_DB_PATH` … SQLiteの保存先（テスト用）。
+- `APP_BASE_URL` … 配信停止URLのドメイン。例 `https://mailwise.example.vercel.app`。未設定時は `http://localhost:3000`。
+- `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` … 本番DB（Turso）の接続情報。未設定ならローカルのSQLiteファイルを使用。
+- `MAILWISE_DB_PATH` … ローカルSQLiteの保存先（テスト用）。
+
+## デプロイ（Vercel + Turso）
+
+Vercelはサーバーレス（実行ごとにファイルが消える）ため、DBは外部のTurso（libSQL）を使います。
+
+1. **Tursoでデータベースを作成**（[turso.tech](https://turso.tech) でサインアップ → 無料枠あり）
+   ```bash
+   # Turso CLI の例
+   turso db create mailwise
+   turso db show mailwise --url          # → TURSO_DATABASE_URL（libsql://...）
+   turso db tokens create mailwise       # → TURSO_AUTH_TOKEN
+   ```
+   ※テーブルはアプリ起動時に自動作成されます（手動マイグレーション不要）。
+2. **GitHubリポジトリをVercelにインポート**（このリポジトリを連携）。
+3. **Vercelの環境変数を設定**（Project → Settings → Environment Variables）
+   - `TURSO_DATABASE_URL`
+   - `TURSO_AUTH_TOKEN`
+   - `APP_BASE_URL`（デプロイ後の本番URL。例 `https://mailwise.example.vercel.app`）
+4. **Deploy**。発行された `https://～.vercel.app` が、このWebアプリのURLです。
+   - 配信停止URLは `https://～.vercel.app/unsubscribe?id=配信停止ID` の形で出力CSVに入ります。
+
+> 補足: `APP_BASE_URL` は配信停止URLの生成にのみ使われます。独自ドメインをVercelに割り当てた場合は、その独自ドメインを `APP_BASE_URL` に設定してください。
 
 ## 画面
 

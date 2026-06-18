@@ -18,12 +18,12 @@ const MESSAGES = {
   },
 } as const;
 
-export default function UnsubscribePage({
+export default async function UnsubscribePage({
   searchParams,
 }: {
   searchParams: { id?: string };
 }) {
-  const status = processUnsubscribe(searchParams.id ?? "");
+  const status = await processUnsubscribe(searchParams.id ?? "");
   const msg = MESSAGES[status];
 
   return (
