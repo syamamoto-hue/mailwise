@@ -1,6 +1,6 @@
 // 統合処理API。FormDataで複数CSVファイルと種別を受け取り、処理結果（JSON）を返す。
 import { NextRequest, NextResponse } from "next/server";
-import { parseCsvToMatrix } from "@/lib/parseCsv";
+import { parseCsvToMatrix, decodeCsvBuffer } from "@/lib/parseCsv";
 import { selectRecipients, buildResult } from "@/lib/process";
 import { getAllNgEmailSet, getOrIssueUnsubscribeIds } from "@/lib/db";
 import { buildUnsubscribeUrl } from "@/lib/config";
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
       const file = files[i];
       const type = LIST_TYPES.includes(types[i]) ? types[i] : "その他";
       const label = (labels[i] || "").trim() || type;
-      const text = await file.text();
+      const text = decodeCsvBuffer(await file.arrayBuffer());
       const rows = parseCsvToMatrix(text);
       lists.push({ type, label, rows });
     }

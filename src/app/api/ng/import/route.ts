@@ -1,6 +1,6 @@
 // 配信NGリストの移行用CSVインポートAPI（新形式・旧形式の両対応）。
 import { NextRequest, NextResponse } from "next/server";
-import { parseCsvToMatrix } from "@/lib/parseCsv";
+import { parseCsvToMatrix, decodeCsvBuffer } from "@/lib/parseCsv";
 import { parseNgImport } from "@/lib/ngImport";
 import { addNg } from "@/lib/db";
 
@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "CSVファイルがありません" }, { status: 400 });
     }
 
-    const text = await file.text();
+    const text = decodeCsvBuffer(await file.arrayBuffer());
     const matrix = parseCsvToMatrix(text);
     const records = parseNgImport(matrix);
 
