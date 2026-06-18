@@ -13,11 +13,18 @@ let _schemaReady: Promise<void> | null = null;
 
 function createDbClient(): Client {
   // 本番: Turso（環境変数）。なければローカルのSQLiteファイル。
-  const tursoUrl = process.env.TURSO_DATABASE_URL;
+  // Vercel連携が作る変数名のゆらぎ（TURSO_DATABASE_URL / TURSO_URL 等）を吸収する。
+  const tursoUrl =
+    process.env.TURSO_DATABASE_URL ||
+    process.env.TURSO_URL ||
+    process.env.DATABASE_URL;
+  const tursoToken =
+    process.env.TURSO_AUTH_TOKEN ||
+    process.env.TURSO_TOKEN;
   if (tursoUrl) {
     return createClient({
       url: tursoUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN,
+      authToken: tursoToken,
     });
   }
 
