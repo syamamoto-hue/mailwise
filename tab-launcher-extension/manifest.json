@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "プリセットタブランチャー",
+  "version": "1.0.0",
+  "description": "プリセット→クライアント（歯科など）を選んで、関連URLをまとめて新しいタブで開きます。",
+  "permissions": ["storage", "tabs", "tabGroups"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "プリセットタブランチャー"
+  },
+  "options_page": "options.html"
+}

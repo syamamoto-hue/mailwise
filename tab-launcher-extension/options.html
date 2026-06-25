@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>プリセットタブランチャー 設定</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="options">
+  <header class="top">
+    <h1>プリセットタブランチャー 設定</h1>
+    <div class="top-actions">
+      <button id="export" class="ghost" type="button">⬇ バックアップ書き出し</button>
+      <button id="import" class="ghost" type="button">⬆ 読み込み</button>
+      <input id="import-file" type="file" accept="application/json" hidden>
+    </div>
+  </header>
+
+  <p class="lead">
+    「プリセット」の中に「クライアント（歯科など）」を作り、その中に開きたいURLを登録します。<br>
+    入力した内容は<strong>自動で保存</strong>されます。
+  </p>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span>プリセット</span>
+        <button id="add-preset" class="add small" type="button">＋ 追加</button>
+      </div>
+      <ul id="preset-list" class="preset-list"></ul>
+    </aside>
+
+    <main id="editor" class="editor"></main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="common.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

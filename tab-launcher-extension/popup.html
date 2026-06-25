@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="popup">
+  <!-- 画面1: プリセット一覧 -->
+  <section id="preset-view">
+    <header class="bar">
+      <strong>プリセットを選択</strong>
+      <button id="open-options" class="link" type="button">⚙️ 設定</button>
+    </header>
+    <div id="preset-list" class="list"></div>
+  </section>
+
+  <!-- 画面2: クライアント一覧 -->
+  <section id="client-view" hidden>
+    <header class="bar">
+      <button id="back" class="link" type="button">← 戻る</button>
+      <strong id="preset-title"></strong>
+      <button id="open-options-2" class="link" type="button">⚙️</button>
+    </header>
+    <p class="hint">クライアントを選ぶとタブがまとめて開きます</p>
+    <div id="client-list" class="list"></div>
+  </section>
+
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
